@@ -204,6 +204,9 @@ final class CandidateContentView: NSView {
 final class CandidatePanel: NSPanel {
     private let content = CandidateContentView()
 
+    /// 窗口未注册的告警只打一次 —— 每帧刷屏会把真正有用的日志冲掉。
+    private static var warnedUnregistered = false
+
     /// 鼠标点击命中候选时回调 (pageLocalIndex; <0 = 翻页按钮 -1=上 -2=下)。
     var onSelect: ((Int) -> Void)? {
         get { content.onSelect }
@@ -262,6 +265,15 @@ final class CandidatePanel: NSPanel {
         self.contentView = content
         content.onDragMoved = { [weak self] in self?.pinCurrentPosition() }
         content.onDragEnded = { [weak self] in self?.finishDrag() }
+
+        // 窗口服务器注册自检。本类若在 `NSApplication.shared` 之前构造, AppKit 不会把这个
+        // 窗口交给窗口服务器: windowNumber 恒为 0, 也不进 `NSApp.windows`, 之后每次
+        // `orderFrontRegardless()` 都静默无效, 而 `isVisible` 仍读 true —— 候选框永不显示,
+        // 且没有任何报错。宁可在这里吵一次, 也不要让下一次回归变成无声故障。
+        if self.windowNumber == 0 {
+            NSLog("CandidatePanel: windowNumber == 0 —— 窗口未注册到窗口服务器, 候选框将不会显示。"
+                + " 该 NSPanel 必须在 NSApplication.shared 之后构造 (见 main.swift)。")
+        }
     }
 
     /// 以窗口**当前真实位置**落 dragPin（避免按位移累加产生误差）。
@@ -317,6 +329,13 @@ final class CandidatePanel: NSPanel {
             self.setFrameOrigin(origin)
         }
         self.orderFrontRegardless()
+        // 兜底: 走到这里还没 windowNumber, 说明这个窗口对象从来没被窗口服务器接受, 上面那句
+        // orderFrontRegardless 等于没执行。只在第一次吵, 免得每帧刷屏。
+        if self.windowNumber == 0, !Self.warnedUnregistered {
+            Self.warnedUnregistered = true
+            NSLog("CandidatePanel: show() 后 windowNumber 仍为 0 —— 候选框不会出现在屏幕上"
+                + " (isVisible 会误报 true)。检查 NSPanel 是否早于 NSApplication.shared 构造。")
+        }
         // 系统原生窗口阴影按内容 alpha 形状计算且会缓存；内容/尺寸变化后必须 invalidate，
         // 否则阴影残留旧形状或退化为矩形（候选窗为透明背景 + 圆角位图，需据新形状重算）。
         if self.hasShadow { self.invalidateShadow() }
