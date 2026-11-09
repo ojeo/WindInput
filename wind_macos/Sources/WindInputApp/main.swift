@@ -132,11 +132,21 @@ NSLog("WindInputApp IMKServer ready name=\(connectionName) instance=\(String(des
 let axTrusted = AXIsProcessTrusted()
 NSLog("WindInputApp 辅助功能授权: \(axTrusted ? "已获得" : "未获得（按键合成/配对光标回退将静默失效；重新部署后需重新授权）")")
 
+// NSApplication **必须**在任何 NSWindow / NSPanel 之前创建。
+//
+// 它不只是个单例: 首次触碰它才建立到窗口服务器的连接, 而 AppKit 只把**此时之后**创建的
+// 窗口注册进去。早于它的窗口拿不到 windowNumber (恒为 0), 也不进 `NSApp.windows`, 之后
+// 每次 `orderFrontRegardless()` 都静默无效 —— 而 `isVisible` 仍读 true。结果就是候选框
+// 永不显示, 却从里到外看不到一行报错: 服务端的帧、SHM 里的像素、`show()` 的每一步都正常,
+// 只有窗口从未进过窗口服务器。
+//
+// CandidatePanelHost 是单例, 它的 init 会立即构造 CandidatePanel, 所以这一句必须在它前面。
+let app = NSApplication.shared
+// accessory 策略: 不在 Dock 显示, 也不抢菜单焦点. IMKit `.app` 标准做法.
+app.setActivationPolicy(.accessory)
+
 // PR-A.5 Phase 1: 启动候选框 host (订阅 bridge push + mmap SHM)。
 // 失败不致命 — Go 服务可能晚启动, host 内部 lazy retry。
 CandidatePanelHost.shared.start()
 
-let app = NSApplication.shared
-// accessory 策略: 不在 Dock 显示, 也不抢菜单焦点. IMKit `.app` 标准做法.
-app.setActivationPolicy(.accessory)
 app.run()
